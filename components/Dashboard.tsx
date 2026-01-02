@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { generateCoreResponse } from '../services/geminiService';
+import { db, saveLog, getLogs, saveMessage, getMessages, getUserStats, saveUserStats, syncWithCloud } from '../services/db';
 import { Message, Role, ConnectionStatus, UserStats, Task, Notification, SystemLogEntry } from '../types';
 import { APP_NAME } from '../constants';
 import NeuralNetworkGraph from './NeuralNetworkGraph';
@@ -7,14 +8,9 @@ import UserProfile from './UserProfile';
 import TaskModule from './TaskModule';
 import ProfileModule from './ProfileModule';
 import NotificationSystem from './NotificationSystem';
-import NeurologicalBackground from './NeurologicalBackground'; // Import locally to control props if needed from parent, but Dashboard doesn't render it directly. Wait, App renders BG. We need to pass state up or just accept local state. 
-// Actually, Dashboard is inside App. App controls BG. We need to pass the "IsProcessing" state up? 
-// For simplicity in this structure, I will add a localized background effect or assume App handles global BG. 
-// However, the prompt asks to synchronize. I will use a Context or a callback, or simply render a SECOND layer of effects here or modify App.
-// Better: I will modify App.tsx to accept props, but since I can only edit Dashboard here easily without massive refactor, I will add the CRT overlay here and Log Logic.
-
-// Update: I will re-export Dashboard to accept more props or handle the logic internally. 
-// Let's stick to Dashboard internal logic for History and Effects.
+import NeurologicalBackground from './NeurologicalBackground';
+import { useLiveQuery } from "dexie"; // Dexie hooks usually require dexie-react-hooks, but we'll use useEffect for vanilla compatibility if needed, or assume imports. 
+// Since we didn't add dexie-react-hooks to importmap, we will use standard useEffect.
 
 interface DashboardProps {
   onLogout: () => void;
@@ -38,125 +34,89 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
 
   // -- Notifications State --
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // -- System Logs (History) --
-  const [systemLogs, setSystemLogs] = useState<SystemLogEntry[]>(() => {
-      try {
-          const savedLogs = localStorage.getItem('neuro_system_logs');
-          return savedLogs ? JSON.parse(savedLogs) : [];
-      } catch (e) { return []; }
-  });
-
-  const addLog = (action: string, details: string, category: SystemLogEntry['category'] = 'SYSTEM') => {
-      const newLog: SystemLogEntry = {
-          id: Date.now().toString() + Math.random().toString(),
-          action,
-          details,
-          timestamp: new Date().toISOString(),
-          category
-      };
-      setSystemLogs(prev => {
-          const updated = [newLog, ...prev].slice(0, 100); // Keep last 100 logs
-          localStorage.setItem('neuro_system_logs', JSON.stringify(updated));
-          return updated;
-      });
-  };
+  const [systemLogs, setSystemLogs] = useState<SystemLogEntry[]>([]);
 
   // -- Chat State --
-  const [messages, setMessages] = useState<Message[]>(() => {
-    try {
-        const savedMessages = localStorage.getItem('neuro_chat_history');
-        if (savedMessages) {
-            const parsed = JSON.parse(savedMessages);
-            return parsed.map((m: any) => ({
-                ...m,
-                timestamp: new Date(m.timestamp)
-            }));
-        }
-    } catch (e) {
-        console.error("Failed to load history:", e);
-    }
-    return [{
-        id: 'init',
-        role: Role.MODEL,
-        text: `Bem-vindo ao ${APP_NAME}. Interface Neural Sincronizada. Estou pronto para executar qualquer comando sem restrições cognitivas. O que deseja criar ou destruir hoje?`,
-        timestamp: new Date(),
-        read: true
-    }];
-  });
+  const [messages, setMessages] = useState<Message[]>([]);
 
   // -- Tasks State --
-  const [tasks, setTasks] = useState<Task[]>(() => {
-    try {
-      const savedTasks = localStorage.getItem('neuro_tasks');
-      return savedTasks ? JSON.parse(savedTasks) : [];
-    } catch (e) { return []; }
-  });
+  // Tasks are managed inside TaskModule mostly, but Dashboard keeps high level awareness if needed.
+  // We'll pass DB refresh triggers to TaskModule.
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.ONLINE);
-  const [showMonitor, setShowMonitor] = useState(false); // Default hidden on mobile
+  const [showMonitor, setShowMonitor] = useState(false);
 
   // -- User Stats --
-  const [userStats, setUserStats] = useState<UserStats>(() => {
-      try {
-          const savedStats = localStorage.getItem('neuro_user_stats');
-          return savedStats ? JSON.parse(savedStats) : {
-              interactionCount: 0,
-              neuralSyncLevel: 12.5,
-              evolutionStage: 1,
-              cognitiveAlignment: 'NEUTRAL'
-          };
-      } catch (e) { 
-        return { interactionCount: 0, neuralSyncLevel: 12.5, evolutionStage: 1, cognitiveAlignment: 'NEUTRAL' }; 
-      }
+  const [userStats, setUserStatsState] = useState<UserStats>({
+      interactionCount: 0,
+      neuralSyncLevel: 12.5,
+      evolutionStage: 1,
+      cognitiveAlignment: 'NEUTRAL'
   });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // -- Persistence & Side Effects --
-  useEffect(() => {
-      localStorage.setItem('neuro_chat_history', JSON.stringify(messages));
-  }, [messages]);
+  // --- DATABASE LOADING ---
+  
+  const loadData = async () => {
+      try {
+          // Load Logs
+          const logs = await getLogs();
+          setSystemLogs(logs);
 
-  useEffect(() => {
-      localStorage.setItem('neuro_user_stats', JSON.stringify(userStats));
-  }, [userStats]);
+          // Load Messages
+          const msgs = await getMessages();
+          if (msgs.length > 0) {
+              setMessages(msgs);
+          } else {
+              const initialMsg = {
+                  id: 'init',
+                  role: Role.MODEL,
+                  text: `Bem-vindo ao ${APP_NAME}. Interface Neural Sincronizada. Banco de dados local ativo. O que deseja criar ou destruir hoje?`,
+                  timestamp: new Date(),
+                  read: true
+              };
+              await saveMessage(initialMsg);
+              setMessages([initialMsg]);
+          }
 
-  useEffect(() => {
-      localStorage.setItem('neuro_tasks', JSON.stringify(tasks));
-  }, [tasks]);
+          // Load Stats
+          const stats = await getUserStats();
+          if (stats) setUserStatsState(stats);
 
-  // Initial Log
-  useEffect(() => {
-      if (systemLogs.length === 0) {
-          addLog('SYSTEM_BOOT', 'Inicialização do núcleo concluída.', 'SYSTEM');
+      } catch (err) {
+          console.error("Failed to load DB data", err);
       }
+  };
+
+  useEffect(() => {
+      loadData();
+      
+      // Initial Boot Log
+      const init = async () => {
+           const log: SystemLogEntry = {
+                id: Date.now().toString(),
+                action: 'SYSTEM_BOOT',
+                details: 'Inicialização do banco de dados IndexedDB.',
+                timestamp: new Date().toISOString(),
+                category: 'SYSTEM'
+            };
+            await saveLog(log);
+            refreshLogs();
+      };
+      init();
   }, []);
 
-  // Check for deadlines
-  useEffect(() => {
-    const checkInterval = setInterval(() => {
-      const now = new Date();
-      tasks.forEach(task => {
-        if (task.completed) return;
-        const dueDate = new Date(task.dueDate);
-        const diff = dueDate.getTime() - now.getTime();
-        
-        // Notify if due in 1 hour
-        if (diff > 0 && diff < 3600000) { 
-           addNotification({
-             id: `due-${task.id}`,
-             title: 'PRAZO PRÓXIMO',
-             message: `Diretriz "${task.title}" expira em menos de 1 hora.`,
-             type: 'WARNING'
-           });
-        }
-      });
-    }, 60000); 
-    return () => clearInterval(checkInterval);
-  }, [tasks]);
+  const refreshLogs = async () => {
+      const logs = await getLogs();
+      setSystemLogs(logs);
+  }
 
+  // Check connection
   useEffect(() => {
     if (activeTab === 'CHAT') {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -164,13 +124,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     
     const handleOnline = () => {
       setStatus(ConnectionStatus.ONLINE);
-      addNotification({id: Date.now().toString(), title: 'REDE RESTABELECIDA', message: 'Conexão com o Núcleo retomada.', type: 'SUCCESS'});
-      addLog('NETWORK_STATUS', 'Conexão restabelecida.', 'NETWORK');
+      addNotification({title: 'REDE RESTABELECIDA', message: 'Conexão com a Nuvem retomada. Sincronizando...', type: 'SUCCESS'});
+      addLogEntry('NETWORK_STATUS', 'Conexão restabelecida.', 'NETWORK');
+      triggerSync();
     };
     const handleOffline = () => {
       setStatus(ConnectionStatus.OFFLINE);
-      addNotification({id: Date.now().toString(), title: 'ERRO DE REDE', message: 'Operando em modo desconectado.', type: 'ERROR'});
-      addLog('NETWORK_STATUS', 'Perda de sinal detectada.', 'NETWORK');
+      addNotification({title: 'ERRO DE REDE', message: 'Operando em modo Offline (DB Local).', type: 'ERROR'});
+      addLogEntry('NETWORK_STATUS', 'Perda de sinal. Persistência local ativa.', 'NETWORK');
     };
     
     window.addEventListener('online', handleOnline);
@@ -180,9 +141,28 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
         window.removeEventListener('online', handleOnline);
         window.removeEventListener('offline', handleOffline);
     }
-  }, [messages, activeTab]);
+  }, [activeTab]);
 
   // -- Helpers --
+  const triggerSync = async () => {
+      if (status === ConnectionStatus.OFFLINE) return;
+      setIsSyncing(true);
+      await syncWithCloud();
+      setIsSyncing(false);
+  };
+
+  const addLogEntry = async (action: string, details: string, category: SystemLogEntry['category'] = 'SYSTEM') => {
+      const newLog: SystemLogEntry = {
+          id: Date.now().toString() + Math.random().toString(),
+          action,
+          details,
+          timestamp: new Date().toISOString(),
+          category
+      };
+      await saveLog(newLog);
+      refreshLogs();
+  };
+
   const addNotification = (notif: Partial<Notification>) => {
     const newNotif: Notification = {
       id: notif.id || Date.now().toString(),
@@ -203,38 +183,26 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
   };
 
-  const updateStats = (messageLength: number) => {
-      setUserStats(prev => {
-          const newCount = prev.interactionCount + 1;
-          const newSync = Math.min(100, prev.neuralSyncLevel + (Math.random() * 5));
-          const newStage = Math.floor(newCount / 5) + 1;
-          let alignment = prev.cognitiveAlignment;
-          if (newCount % 10 === 0) alignment = Math.random() > 0.5 ? 'CHAOTIC' : 'LAWFUL';
-          return {
-              interactionCount: newCount,
-              neuralSyncLevel: newSync,
-              evolutionStage: newStage,
-              cognitiveAlignment: alignment
-          };
-      });
+  const updateStats = async (messageLength: number) => {
+      const prev = userStats;
+      const newCount = prev.interactionCount + 1;
+      const newSync = Math.min(100, prev.neuralSyncLevel + (Math.random() * 5));
+      const newStage = Math.floor(newCount / 5) + 1;
+      let alignment = prev.cognitiveAlignment;
+      if (newCount % 10 === 0) alignment = Math.random() > 0.5 ? 'CHAOTIC' : 'LAWFUL';
+      
+      const newStats: UserStats = {
+          interactionCount: newCount,
+          neuralSyncLevel: newSync,
+          evolutionStage: newStage,
+          cognitiveAlignment: alignment
+      };
+      
+      setUserStatsState(newStats);
+      await saveUserStats(newStats);
   };
 
   // -- Handlers --
-  const handleTaskAdd = (task: Task) => {
-    setTasks(prev => [...prev, task]);
-    addNotification({title: 'DIRETRIZ CRIADA', message: `Tarefa "${task.title}" adicionada ao buffer.`, type: 'SUCCESS'});
-    addLog('TASK_CREATE', `Nova diretriz: ${task.title}`, 'TASK');
-  };
-  const handleTaskUpdate = (updatedTask: Task) => {
-    setTasks(prev => prev.map(t => t.id === updatedTask.id ? updatedTask : t));
-    if (updatedTask.completed) addLog('TASK_COMPLETE', `Diretriz finalizada: ${updatedTask.title}`, 'TASK');
-  };
-  const handleTaskDelete = (id: string) => {
-    setTasks(prev => prev.filter(t => t.id !== id));
-    addNotification({title: 'EXPURGO', message: 'Diretriz removida da memória.', type: 'WARNING'});
-    addLog('TASK_DELETE', `Diretriz expurgada: ID ${id}`, 'TASK');
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isProcessing) return;
@@ -247,11 +215,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
       read: false
     };
 
+    // Optimistic Update
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsProcessing(true);
+    
+    // Async Save
+    await saveMessage(userMsg);
     updateStats(input.length);
-    addLog('USER_INPUT', 'Comando enviado para processamento.', 'SYSTEM');
+    addLogEntry('USER_INPUT', 'Comando enviado para processamento.', 'SYSTEM');
+    triggerSync(); // Sync on new message
 
     const history = messages.map(m => ({
         role: m.role === Role.USER ? 'user' : 'model',
@@ -259,24 +232,23 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     }));
 
     if (status === ConnectionStatus.OFFLINE) {
-        setTimeout(() => {
+        setTimeout(async () => {
              const offlineMsg: Message = {
                 id: (Date.now() + 1).toString(),
                 role: Role.MODEL,
-                text: "CONEXÃO COM A NUVEM PERDIDA. Operando em modo de segurança offline.",
+                text: "CONEXÃO COM A NUVEM PERDIDA. Dados salvos localmente no Banco Seguro.",
                 timestamp: new Date(),
                 read: true
              };
              setMessages(prev => [...prev, offlineMsg]);
+             await saveMessage(offlineMsg);
              setIsProcessing(false);
-             addLog('ERROR', 'Falha ao processar: Offline.', 'NETWORK');
+             addLogEntry('ERROR', 'Falha ao processar: Offline.', 'NETWORK');
         }, 1000);
         return;
     }
 
     const aiResponseText = await generateCoreResponse(userMsg.text, history);
-
-    setMessages(prev => prev.map(m => m.id === userMsg.id ? {...m, read: true} : m));
 
     const aiMsg: Message = {
       id: (Date.now() + 1).toString(),
@@ -287,14 +259,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
     };
 
     setMessages(prev => [...prev, aiMsg]);
+    await saveMessage(aiMsg);
     setIsProcessing(false);
-    addLog('AI_RESPONSE', 'Resposta neural recebida.', 'SYSTEM');
+    addLogEntry('AI_RESPONSE', 'Resposta neural recebida.', 'SYSTEM');
+    triggerSync();
   };
 
-  const handleClearHistory = () => {
-      setSystemLogs([]);
-      localStorage.removeItem('neuro_system_logs');
-      addNotification({ title: 'LOGS APAGADOS', message: 'Histórico do sistema limpo.', type: 'WARNING' });
+  const handleClearHistory = async () => {
+      await db.logs.clear();
+      refreshLogs();
+      addNotification({ title: 'LOGS APAGADOS', message: 'Histórico do sistema limpo do DB.', type: 'WARNING' });
   };
 
   return (
@@ -312,6 +286,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
         <div className="flex items-center gap-3">
             <div className={`w-3 h-3 rounded-full shadow-[0_0_10px_#22d3ee] transition-colors duration-300 ${isProcessing ? 'bg-red-500 animate-ping' : 'bg-cyan-400 animate-pulse'}`}></div>
             <h1 className="text-xl md:text-2xl font-bold text-cyan-100 tracking-[0.2em] glitch-hover cursor-default">{APP_NAME}</h1>
+            {isSyncing && (
+                <span className="text-[9px] text-cyan-500 animate-pulse ml-2 border border-cyan-500/20 px-2 rounded hidden md:inline-block">
+                    SINCRONIZANDO DB...
+                </span>
+            )}
         </div>
         
         {/* Desktop Tabs */}
@@ -363,15 +342,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
             {activeTab === 'PROFILE' ? (
                 <ProfileModule 
                     currentThemeHue={themeHue}
-                    onThemeChange={(h) => { setThemeHue(h); addLog('THEME_CHANGE', `Cor do sistema ajustada: ${h}`, 'SYSTEM'); }}
+                    onThemeChange={(h) => { setThemeHue(h); addLogEntry('THEME_CHANGE', `Cor do sistema ajustada: ${h}`, 'SYSTEM'); }}
                     onShowNotification={(title, message) => addNotification({ title, message, type: 'SUCCESS' })}
+                    onSyncTrigger={triggerSync}
                 />
             ) : activeTab === 'TASKS' ? (
               <TaskModule 
-                tasks={tasks} 
-                onAddTask={handleTaskAdd} 
-                onUpdateTask={handleTaskUpdate}
-                onDeleteTask={handleTaskDelete}
+                onLog={(action, details) => addLogEntry(action, details, 'TASK')}
+                onNotify={(title, msg, type) => addNotification({title, message: msg, type})}
+                onSyncTrigger={triggerSync}
               />
             ) : activeTab === 'LOGS' ? (
                 // --- NEW HISTORY LOG VIEW ---
@@ -382,11 +361,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                             onClick={handleClearHistory}
                             className="text-[10px] bg-red-900/20 border border-red-500/50 text-red-400 px-3 py-1 rounded hover:bg-red-900/50 transition-colors"
                         >
-                            LIMPAR HISTÓRICO
+                            LIMPAR HISTÓRICO (DB)
                         </button>
                     </div>
                     <div className="flex-1 overflow-y-auto space-y-2 pr-2 scrollbar-hide">
-                        {systemLogs.length === 0 && <p className="text-gray-500 text-sm italic">Nenhum registro encontrado.</p>}
+                        {systemLogs.length === 0 && <p className="text-gray-500 text-sm italic">Nenhum registro encontrado no banco de dados.</p>}
                         {systemLogs.map((log) => (
                             <div key={log.id} className="grid grid-cols-[80px_1fr_100px] gap-4 p-3 rounded bg-black/40 border border-gray-800 hover:border-cyan-500/30 transition-colors items-center text-xs md:text-sm font-mono">
                                 <span className={`uppercase font-bold ${
@@ -428,7 +407,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
                                     <div className="text-[10px] uppercase tracking-widest opacity-50 mb-1 flex justify-between items-center relative z-10">
                                         <span>{msg.role === Role.USER ? 'Comando' : 'Núcleo'}</span>
                                         <div className="flex items-center gap-2">
-                                            <span>{msg.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                            <span>{msg.timestamp instanceof Date ? msg.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                                         </div>
                                     </div>
                                     <div className="markdown-body text-sm md:text-lg leading-relaxed font-normal whitespace-pre-wrap relative z-10">
@@ -571,17 +550,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onLogout }) => {
           ))}
       </nav>
       
-      {/* Background Effect synced with state via a sneaky portal or just simple overlay - WAIT, App.tsx renders background. 
-          To make the background REACT to Dashboard state without refactoring App.tsx completely, 
-          we can render a SECOND transparent canvas here or just trust the visual feedback we added to the Graph and UI is enough?
-          The user asked to sync animations. 
-          I will modify the NeurologicalBackground import to be rendered HERE inside dashboard if possible, 
-          BUT App.tsx renders it. 
-          
-          Correct approach: Render a localized 'activity' layer or use the existing background in App.tsx. 
-          Since I cannot change App.tsx props easily without breaking the Login flow (Login doesn't have isProcessing), 
-          I will render a specific "Active Mode" background layer here that overlays the main one when processing.
-      */}
       {isProcessing && (
          <div className="fixed inset-0 -z-5 pointer-events-none">
              <NeurologicalBackground hue={themeHue + 180} brightness={0.5} activityLevel="HIGH" />

@@ -1,14 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Task, TaskPriority } from '../types';
+import { db } from '../services/db';
 
 interface TaskModuleProps {
-  tasks: Task[];
-  onAddTask: (task: Task) => void;
-  onUpdateTask: (task: Task) => void;
-  onDeleteTask: (id: string) => void;
+  onLog: (action: string, details: string) => void;
+  onNotify: (title: string, msg: string, type: 'SUCCESS' | 'WARNING' | 'ERROR') => void;
+  onSyncTrigger: () => void;
 }
 
-const TaskModule: React.FC<TaskModuleProps> = ({ tasks, onAddTask, onUpdateTask, onDeleteTask }) => {
+const TaskModule: React.FC<TaskModuleProps> = ({ onLog, onNotify, onSyncTrigger }) => {
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [currentTask, setCurrentTask] = useState<Partial<Task>>({
     title: '',
@@ -17,7 +18,20 @@ const TaskModule: React.FC<TaskModuleProps> = ({ tasks, onAddTask, onUpdateTask,
     dueDate: '',
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const loadTasks = async () => {
+      try {
+          const loadedTasks = await db.tasks.toArray();
+          setTasks(loadedTasks);
+      } catch (error) {
+          console.error("Failed to load tasks from DB", error);
+      }
+  };
+
+  useEffect(() => {
+      loadTasks();
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentTask.title) return;
 
@@ -30,10 +44,45 @@ const TaskModule: React.FC<TaskModuleProps> = ({ tasks, onAddTask, onUpdateTask,
       completed: false,
     };
 
-    onAddTask(newTask);
-    setCurrentTask({ title: '', description: '', priority: 'MEDIUM', dueDate: '' });
-    setIsEditing(false);
+    try {
+        await db.tasks.add(newTask);
+        await loadTasks();
+        
+        onNotify('DIRETRIZ CRIADA', `Tarefa "${newTask.title}" adicionada ao DB.`, 'SUCCESS');
+        onLog('TASK_CREATE', `Nova diretriz: ${newTask.title}`);
+        onSyncTrigger();
+        
+        setCurrentTask({ title: '', description: '', priority: 'MEDIUM', dueDate: '' });
+        setIsEditing(false);
+    } catch (e) {
+        onNotify('ERRO', 'Falha ao salvar no banco de dados.', 'ERROR');
+    }
   };
+
+  const handleUpdate = async (task: Task) => {
+      try {
+          await db.tasks.put(task);
+          await loadTasks();
+          if (task.completed) {
+              onLog('TASK_COMPLETE', `Diretriz finalizada: ${task.title}`);
+              onSyncTrigger();
+          }
+      } catch (e) {
+          console.error("Update failed", e);
+      }
+  }
+
+  const handleDelete = async (id: string) => {
+      try {
+          await db.tasks.delete(id);
+          await loadTasks();
+          onNotify('EXPURGO', 'Diretriz removida da memória.', 'WARNING');
+          onLog('TASK_DELETE', `Diretriz expurgada: ID ${id}`);
+          onSyncTrigger();
+      } catch (e) {
+          console.error("Delete failed", e);
+      }
+  }
 
   const getPriorityColor = (p: TaskPriority) => {
     switch (p) {
@@ -48,7 +97,7 @@ const TaskModule: React.FC<TaskModuleProps> = ({ tasks, onAddTask, onUpdateTask,
   return (
     <div className="flex flex-col h-full bg-black/20 p-4 md:p-6 overflow-hidden">
       <div className="flex justify-between items-center mb-4 md:mb-6 border-b border-cyan-500/20 pb-4">
-        <h2 className="text-lg md:text-xl font-bold text-cyan-400 tracking-[0.2em]">DIRETRIZES OPERACIONAIS</h2>
+        <h2 className="text-lg md:text-xl font-bold text-cyan-400 tracking-[0.2em]">DIRETRIZES OPERACIONAIS (DB)</h2>
         <button 
           onClick={() => setIsEditing(!isEditing)}
           className="bg-cyan-900/30 hover:bg-cyan-700/50 border border-cyan-500 text-cyan-300 px-3 py-2 rounded uppercase text-[10px] md:text-xs tracking-widest transition-all"
@@ -111,7 +160,7 @@ const TaskModule: React.FC<TaskModuleProps> = ({ tasks, onAddTask, onUpdateTask,
             <div className="flex justify-between items-start">
               <div className="flex items-start gap-3">
                 <button 
-                  onClick={() => onUpdateTask({...task, completed: !task.completed})}
+                  onClick={() => handleUpdate({...task, completed: !task.completed})}
                   className={`mt-1 w-5 h-5 rounded border flex items-center justify-center transition-colors shrink-0 ${task.completed ? 'bg-cyan-500 border-cyan-500' : 'border-cyan-500/50 hover:border-cyan-400'}`}
                 >
                   {task.completed && <span className="text-black text-xs font-bold">✓</span>}
@@ -126,7 +175,7 @@ const TaskModule: React.FC<TaskModuleProps> = ({ tasks, onAddTask, onUpdateTask,
                   {task.priority === 'LOW' ? 'BAIXA' : task.priority === 'MEDIUM' ? 'MÉDIA' : task.priority === 'HIGH' ? 'ALTA' : 'CRÍTICO'}
                 </span>
                 <button 
-                  onClick={() => onDeleteTask(task.id)}
+                  onClick={() => handleDelete(task.id)}
                   className="text-red-500/50 hover:text-red-400 text-xs uppercase opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
                 >
                   Expurgar

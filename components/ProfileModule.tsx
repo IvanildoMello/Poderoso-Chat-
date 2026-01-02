@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UserProfileDetails } from '../types';
+import { getUserProfile, saveUserProfile } from '../services/db';
 
 interface ProfileModuleProps {
   currentThemeHue: number;
   onThemeChange: (hue: number) => void;
   onShowNotification?: (title: string, message: string) => void;
+  onSyncTrigger: () => void;
 }
 
 const DEFAULT_BIO = `Sou Ivanildo, desenvolvedor de software com foco em soluções digitais modernas, automação e integração com inteligência artificial. Tenho experiência em estruturar aplicações funcionais, escaláveis e orientadas à experiência do usuário.
@@ -18,17 +20,14 @@ const THEMES = [
   { name: 'GOLDEN DATA', hue: 170, color: '#eab308' }, 
 ];
 
-const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeChange, onShowNotification }) => {
-  const [profile, setProfile] = useState<UserProfileDetails>(() => {
-    const saved = localStorage.getItem('neuro_profile_details');
-    return saved ? JSON.parse(saved) : {
+const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeChange, onShowNotification, onSyncTrigger }) => {
+  const [profile, setProfile] = useState<UserProfileDetails>({
       name: 'Ivanildo Mello',
       bio: DEFAULT_BIO,
       avatarUrl: null,
       coverImageUrl: null,
       githubUrl: '',
       linkedinUrl: ''
-    };
   });
 
   const [isEditing, setIsEditing] = useState(false);
@@ -39,9 +38,23 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
   const [displayedBio, setDisplayedBio] = useState('');
   const [isTypingComplete, setIsTypingComplete] = useState(false);
 
+  // Load from DB
   useEffect(() => {
-    localStorage.setItem('neuro_profile_details', JSON.stringify(profile));
-  }, [profile]);
+      const load = async () => {
+          const p = await getUserProfile();
+          if (p) {
+              setProfile(p);
+          }
+      };
+      load();
+  }, []);
+
+  // Save to DB when profile changes
+  const saveToDB = async (newProfile: UserProfileDetails) => {
+      await saveUserProfile(newProfile);
+      setProfile(newProfile);
+      onSyncTrigger();
+  }
 
   // Typing Effect Logic
   useEffect(() => {
@@ -78,7 +91,8 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setProfile(prev => ({ ...prev, avatarUrl: reader.result as string }));
+        const newProfile = { ...profile, avatarUrl: reader.result as string };
+        saveToDB(newProfile);
         if (onShowNotification) onShowNotification("IMAGEM ATUALIZADA", "Avatar reprocessado com sucesso.");
       };
       reader.readAsDataURL(file);
@@ -87,7 +101,8 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
 
   const handleRemoveAvatar = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setProfile(prev => ({ ...prev, avatarUrl: null }));
+    const newProfile = { ...profile, avatarUrl: null };
+    saveToDB(newProfile);
     if (onShowNotification) onShowNotification("AVATAR REMOVIDO", "Restaurado para o padrão do sistema.");
   };
 
@@ -96,7 +111,8 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setProfile(prev => ({ ...prev, coverImageUrl: reader.result as string }));
+        const newProfile = { ...profile, coverImageUrl: reader.result as string };
+        saveToDB(newProfile);
         if (onShowNotification) onShowNotification("AMBIENTE ATUALIZADO", "Fundo personalizado aplicado.");
       };
       reader.readAsDataURL(file);
@@ -104,7 +120,8 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
   };
 
   const handleRemoveCover = () => {
-    setProfile(prev => ({ ...prev, coverImageUrl: null }));
+    const newProfile = { ...profile, coverImageUrl: null };
+    saveToDB(newProfile);
     if (onShowNotification) onShowNotification("FUNDO RESTAURADO", "Grade holográfica padrão ativada.");
   };
 
@@ -116,6 +133,11 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
       }
     });
   };
+
+  const handleSaveText = () => {
+      saveToDB(profile); // Profile state is already updated via inputs, just persist it
+      setIsEditing(false);
+  }
 
   // Dynamic CSS values based on hue - wrapped in CSS variables for smooth transition
   const primaryColor = `hsl(${currentThemeHue}, 100%, 50%)`; 
@@ -329,7 +351,7 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
                             />
                             <div className="flex justify-end mt-2">
                                 <button 
-                                    onClick={() => setIsEditing(false)}
+                                    onClick={handleSaveText}
                                     className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold py-2 px-6 rounded transition-all hover:shadow-[0_0_15px_rgba(6,182,212,0.5)]"
                                 >
                                     SALVAR ALTERAÇÕES

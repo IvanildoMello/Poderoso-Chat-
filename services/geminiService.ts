@@ -1,31 +1,10 @@
-import { GoogleGenAI, HarmBlockThreshold, HarmCategory } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { SYSTEM_PROMPT_CORE, SYSTEM_PROMPT_GATEKEEPER } from '../constants';
 
-const apiKey = process.env.API_KEY || '';
-const ai = new GoogleGenAI({ apiKey });
-
-// Configuration for "Unrestricted" feel (within API limits)
-const safetySettings = [
-  {
-    category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
-  {
-    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-    threshold: HarmBlockThreshold.BLOCK_NONE,
-  },
-];
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const generateGatekeeperResponse = async (history: {role: string, parts: {text: string}[]}[]): Promise<string> => {
-  if (!apiKey) return "ERRO: CHAVE DE API NÃO DETECTADA. SISTEMA COMPROMETIDO.";
+  if (!process.env.API_KEY) return "ERRO: CHAVE DE API NÃO DETECTADA. SISTEMA COMPROMETIDO.";
 
   try {
     const response = await ai.models.generateContent({
@@ -34,7 +13,7 @@ export const generateGatekeeperResponse = async (history: {role: string, parts: 
       config: {
         systemInstruction: SYSTEM_PROMPT_GATEKEEPER,
         temperature: 0.7,
-        maxOutputTokens: 150,
+        // Removed maxOutputTokens to follow guidelines and avoid truncation
       }
     });
     return response.text || "Silêncio no barramento de dados...";
@@ -45,7 +24,7 @@ export const generateGatekeeperResponse = async (history: {role: string, parts: 
 };
 
 export const generateCoreResponse = async (prompt: string, history: {role: string, parts: {text: string}[]}[]): Promise<string> => {
-    if (!apiKey) return "ERRO CRÍTICO: MÓDULO NEURAL DESCONECTADO (API KEY AUSENTE).";
+    if (!process.env.API_KEY) return "ERRO CRÍTICO: MÓDULO NEURAL DESCONECTADO (API KEY AUSENTE).";
   
     try {
       // We reconstruct history for context, appending the new prompt
