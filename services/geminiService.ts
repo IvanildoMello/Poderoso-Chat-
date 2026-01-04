@@ -1,10 +1,19 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { SYSTEM_PROMPT_CORE, SYSTEM_PROMPT_GATEKEEPER } from '../constants';
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const getAIClient = () => {
+  const apiKey = process.env.API_KEY;
+  if (!apiKey || apiKey === "undefined") {
+    console.error("MÓDULO CRÍTICO: Chave de API ausente.");
+    return null;
+  }
+  return new GoogleGenAI({ apiKey });
+};
 
 export const generateGatekeeperResponse = async (history: {role: string, parts: {text: string}[]}[]): Promise<string> => {
-  if (!process.env.API_KEY) return "ERRO: CHAVE DE API NÃO DETECTADA. SISTEMA COMPROMETIDO.";
+  const ai = getAIClient();
+  if (!ai) return "ERRO DE PROTOCOLO: Chave de segurança não detectada.";
 
   try {
     const response = await ai.models.generateContent({
@@ -13,38 +22,42 @@ export const generateGatekeeperResponse = async (history: {role: string, parts: 
       config: {
         systemInstruction: SYSTEM_PROMPT_GATEKEEPER,
         temperature: 0.7,
-        // Removed maxOutputTokens to follow guidelines and avoid truncation
       }
     });
-    return response.text || "Silêncio no barramento de dados...";
-  } catch (error) {
-    console.error("Gatekeeper error:", error);
-    return "Erro de conexão neural. Tente novamente.";
+    return response.text || "Sem resposta.";
+  } catch (error: any) {
+    console.error("Falha no Gatekeeper:", error);
+    return "Erro de conexão neural. As sinapses do Guardião estão instáveis.";
   }
 };
 
-export const generateCoreResponse = async (prompt: string, history: {role: string, parts: {text: string}[]}[]): Promise<string> => {
-    if (!process.env.API_KEY) return "ERRO CRÍTICO: MÓDULO NEURAL DESCONECTADO (API KEY AUSENTE).";
+export const generateCoreResponse = async (prompt: string, history: {role: string, parts: {text: string}[]}[]) => {
+    const ai = getAIClient();
+    if (!ai) return { text: "ERRO CRÍTICO: Núcleo neural desativado.", chunks: [] };
   
     try {
-      // We reconstruct history for context, appending the new prompt
       const contents = [
           ...history,
           { role: 'user', parts: [{ text: prompt }] }
       ];
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview', // More powerful model for the "Core"
+        model: 'gemini-3-flash-preview', // Flash para velocidade extrema com busca
         contents: contents,
         config: {
           systemInstruction: SYSTEM_PROMPT_CORE,
-          temperature: 0.9, // Higher creativity
-          thinkingConfig: { thinkingBudget: 1024 }, // Enable thinking for complex tasks
+          temperature: 0.3, // Menor temperatura para maior precisão factual
+          tools: [{ googleSearch: {} }],
+          thinkingConfig: { thinkingBudget: 0 }, // 0 para resposta instantânea em tarefas simples
         }
       });
-      return response.text || "Processamento concluído. Sem saída de dados.";
-    } catch (error) {
-      console.error("Core error:", error);
-      return "Falha na sinapse central. Verifique sua conexão com a Matrix.";
+      
+      const text = response.text || "Processamento concluído.";
+      const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      
+      return { text, chunks };
+    } catch (error: any) {
+      console.error("Falha no Núcleo Central:", error);
+      return { text: "FALHA NA SINAPSE CENTRAL: Link de dados interrompido.", chunks: [] };
     }
   };

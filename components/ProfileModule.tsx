@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UserProfileDetails } from '../types';
-import { getUserProfile, saveUserProfile } from '../services/db';
+import { db, getUserProfile, saveUserProfile } from '../services/db';
 
 interface ProfileModuleProps {
   currentThemeHue: number;
@@ -31,6 +31,7 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
   });
 
   const [isEditing, setIsEditing] = useState(false);
+  const [typingSpeed, setTypingSpeed] = useState(15);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
 
@@ -45,9 +46,20 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
           if (p) {
               setProfile(p);
           }
+          const speedSetting = await db.settings.get('typing_speed' as any);
+          if (speedSetting) {
+            setTypingSpeed(speedSetting.value);
+          }
       };
       load();
   }, []);
+
+  // Save typing speed to DB
+  const handleSpeedChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newSpeed = parseInt(e.target.value);
+    setTypingSpeed(newSpeed);
+    await db.settings.put({ id: 'typing_speed', value: newSpeed });
+  };
 
   // Save to DB when profile changes
   const saveToDB = async (newProfile: UserProfileDetails) => {
@@ -69,9 +81,6 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
     let currentIndex = 0;
     const fullText = profile.bio;
     
-    // Typing speed in ms
-    const typingSpeed = 15; 
-    
     const intervalId = setInterval(() => {
       if (currentIndex < fullText.length) {
         setDisplayedBio(fullText.slice(0, currentIndex + 1));
@@ -83,7 +92,7 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
     }, typingSpeed);
 
     return () => clearInterval(intervalId);
-  }, [profile.bio, isEditing]);
+  }, [profile.bio, isEditing, typingSpeed]);
 
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -135,11 +144,10 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
   };
 
   const handleSaveText = () => {
-      saveToDB(profile); // Profile state is already updated via inputs, just persist it
+      saveToDB(profile); 
       setIsEditing(false);
   }
 
-  // Dynamic CSS values based on hue - wrapped in CSS variables for smooth transition
   const primaryColor = `hsl(${currentThemeHue}, 100%, 50%)`; 
   const secondaryColor = `hsl(${currentThemeHue + 60}, 100%, 40%)`; 
 
@@ -151,9 +159,6 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
             '--dynamic-secondary': secondaryColor
         } as React.CSSProperties}
     >
-      
-      {/* 1. ANIMATED DYNAMIC BACKGROUND */}
-      {/* Base Gradient Layer (Animated) */}
       <div 
         className="absolute inset-0 -z-30 animate-gradient opacity-40 transition-colors duration-1000 ease-in-out"
         style={{
@@ -161,7 +166,6 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
         }}
       />
       
-      {/* Custom Cover Image Layer (Blended & Animated) */}
       {profile.coverImageUrl && (
           <div 
             className="absolute inset-0 -z-20 bg-cover bg-center transition-opacity duration-700 opacity-50 mix-blend-overlay animate-ken-burns"
@@ -169,10 +173,7 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
           />
       )}
       
-      {/* Noise/Texture Overlay for "Tech" feel */}
       <div className="absolute inset-0 -z-10 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-150 contrast-150 mix-blend-overlay pointer-events-none"></div>
-
-      {/* Dark Overlay for text readability */}
       <div className="absolute inset-0 -z-10 bg-black/60 backdrop-blur-[2px]" />
 
       <div className="flex justify-between items-center mb-6 md:mb-8 border-b border-white/10 pb-4 relative z-10">
@@ -181,7 +182,6 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
         </h2>
         
         <div className="flex gap-2 items-center">
-            {/* Background Controls */}
             {profile.coverImageUrl && (
                 <button 
                     onClick={handleRemoveCover}
@@ -203,15 +203,8 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
                 </svg>
                 <span className="hidden md:inline">Fundo</span>
             </button>
-            <input 
-              type="file" 
-              ref={coverInputRef} 
-              className="hidden" 
-              accept="image/*"
-              onChange={handleCoverUpload} 
-            />
+            <input type="file" ref={coverInputRef} className="hidden" accept="image/*" onChange={handleCoverUpload} />
 
-            {/* Share Button */}
             <button 
                 onClick={handleShare}
                 className="flex items-center gap-2 text-xs uppercase tracking-widest text-cyan-500 hover:text-cyan-300 border border-cyan-500/30 hover:border-cyan-400 bg-cyan-900/10 hover:bg-cyan-900/30 px-3 py-1.5 rounded transition-all hover:shadow-[0_0_15px_rgba(6,182,212,0.3)]"
@@ -226,8 +219,6 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8 relative z-10">
-        
-        {/* 2. AVATAR UPLOAD & LEFT COLUMN */}
         <div className="flex flex-col items-center space-y-6">
           <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
             <div className="w-40 h-40 md:w-56 md:h-56 rounded-full border-4 border-cyan-500/30 overflow-hidden shadow-[0_0_30px_rgba(6,182,212,0.2)] bg-black/40 relative z-10 transition-all duration-500 animate-avatar-breath group-hover:animate-none group-hover:shadow-[0_0_60px_rgba(6,182,212,0.8)] group-hover:border-cyan-400 group-hover:scale-105">
@@ -240,35 +231,18 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
                   </svg>
                 </div>
               )}
-              
-              {/* Overlay for upload */}
-              <div 
-                className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 backdrop-blur-sm"
-              >
+              <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 backdrop-blur-sm">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-cyan-400 mb-2 animate-bounce">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
                 </svg>
                 <span className="text-cyan-400 text-xs font-bold uppercase tracking-widest">Alterar Foto</span>
               </div>
             </div>
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              className="hidden" 
-              accept="image/*"
-              onChange={handleImageUpload} 
-            />
-            {/* Decoration ring */}
+            <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
             <div className="absolute -inset-4 border border-dashed border-cyan-500/20 rounded-full animate-[spin_12s_linear_infinite] pointer-events-none group-hover:border-cyan-500/50"></div>
-            
-            {/* Remove Avatar Button (visible on group hover if avatar exists) */}
             {profile.avatarUrl && (
                 <div className="absolute top-0 right-0 z-20 opacity-0 group-hover:opacity-100 transition-opacity p-2">
-                    <button 
-                        onClick={handleRemoveAvatar}
-                        className="bg-red-900/80 p-1.5 rounded-full text-red-300 hover:text-white hover:bg-red-700 border border-red-500/50"
-                        title="Remover Avatar"
-                    >
+                    <button onClick={handleRemoveAvatar} className="bg-red-900/80 p-1.5 rounded-full text-red-300 hover:text-white hover:bg-red-700 border border-red-500/50">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3 h-3">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                         </svg>
@@ -277,10 +251,9 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
             )}
           </div>
 
-          {/* Color Theme Selector */}
           <div className="w-full bg-black/30 p-4 rounded-lg border border-white/10 backdrop-blur-sm shadow-lg">
-            <h3 className="text-xs text-cyan-500 uppercase tracking-widest mb-3 text-center">Calibração Visual (Tema)</h3>
-            <div className="flex justify-center gap-3 flex-wrap">
+            <h3 className="text-xs text-cyan-500 uppercase tracking-widest mb-3 text-center">Calibração Visual</h3>
+            <div className="flex justify-center gap-3 flex-wrap mb-4">
               {THEMES.map((theme) => (
                 <button
                   key={theme.name}
@@ -291,14 +264,27 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
                 />
               ))}
             </div>
+
+            <div className="space-y-2 px-2">
+                <div className="flex justify-between items-center text-[10px] text-gray-500 uppercase tracking-widest">
+                    <span>Velocidade de Processamento</span>
+                    <span className="text-cyan-400 font-mono">{typingSpeed}ms</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="5" 
+                  max="100" 
+                  step="5"
+                  value={typingSpeed} 
+                  onChange={handleSpeedChange}
+                  className="w-full h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                />
+            </div>
           </div>
         </div>
 
-        {/* Right Column: Info & Bio */}
         <div className="md:col-span-2 space-y-6">
-          
           <div className="space-y-6">
-              {/* Name Display */}
               <div className="relative">
                  {isEditing ? (
                   <div className="space-y-1 animate-[fadeIn_0.3s]">
@@ -307,16 +293,16 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
                         type="text" 
                         value={profile.name}
                         onChange={(e) => setProfile({...profile, name: e.target.value})}
-                        className="w-full bg-black/50 border border-cyan-700 rounded p-2 text-xl text-cyan-100 font-bold focus:border-cyan-400 focus:outline-none shadow-[0_0_10px_rgba(6,182,212,0.1)]"
+                        className="w-full bg-black/50 border border-cyan-700 rounded p-2 text-xl text-cyan-100 font-bold focus:border-cyan-400 focus:outline-none"
                         autoFocus
                       />
                   </div>
                 ) : (
                   <div className="flex justify-between items-end border-b border-cyan-500/30 pb-2">
-                    <h1 className="text-2xl md:text-4xl font-bold text-white tracking-wide neon-text drop-shadow-md truncate max-w-[70%]">{profile.name}</h1>
+                    <h1 className="text-2xl md:text-4xl font-bold text-white tracking-wide neon-text truncate max-w-[70%]">{profile.name}</h1>
                     <button 
                         onClick={() => setIsEditing(true)}
-                        className="text-cyan-500 hover:text-cyan-300 text-[10px] md:text-xs uppercase tracking-widest bg-cyan-900/10 px-3 py-1 rounded border border-cyan-500/20 hover:border-cyan-400 transition-all hover:shadow-[0_0_10px_rgba(6,182,212,0.3)] whitespace-nowrap"
+                        className="text-cyan-500 hover:text-cyan-300 text-[10px] md:text-xs uppercase tracking-widest bg-cyan-900/10 px-3 py-1 rounded border border-cyan-500/20 hover:border-cyan-400"
                     >
                         Editar Dados
                     </button>
@@ -324,46 +310,28 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
                 )}
               </div>
 
-              {/* 3. BIO SECTION WITH SUBTLE NEON GLOW */}
               <div className="group/bio relative">
-                <div 
-                    className={`
-                        bg-black/40 border border-cyan-500/20 rounded-lg p-6 relative backdrop-blur-md overflow-hidden transition-all duration-700 ease-[cubic-bezier(0.4,0,0.2,1)] min-h-[160px]
-                        ${!isEditing ? 'hover:shadow-[0_0_35px_-5px_rgba(6,182,212,0.15),inset_0_0_25px_rgba(6,182,212,0.05)] hover:border-cyan-500/40 hover:bg-gradient-to-br hover:from-cyan-900/10 hover:to-transparent' : ''}
-                    `}
-                >
-                    {/* Scanline Effect Overlay */}
+                <div className={`bg-black/40 border border-cyan-500/20 rounded-lg p-6 relative backdrop-blur-md min-h-[160px] ${!isEditing ? 'hover:border-cyan-500/40 hover:bg-cyan-900/5' : ''}`}>
                     {!isEditing && (
-                         <div className="absolute inset-0 w-full h-full bg-gradient-to-b from-transparent via-cyan-400/5 to-transparent pointer-events-none opacity-0 group-hover/bio:opacity-100 animate-scanline z-0 transition-opacity duration-700 delay-100"></div>
+                         <div className="absolute inset-0 w-full h-full bg-gradient-to-b from-transparent via-cyan-400/5 to-transparent pointer-events-none animate-scanline"></div>
                     )}
-
                     <div className="relative z-10">
-                        <label className="text-[10px] text-gray-500 uppercase tracking-widest block mb-2 group-hover/bio:text-cyan-400 transition-colors">
-                            Arquivo de Dados (Sobre)
-                        </label>
-                        
+                        <label className="text-[10px] text-gray-500 uppercase tracking-widest block mb-2">Arquivo de Dados</label>
                         {isEditing ? (
                         <div className="animate-[fadeIn_0.3s]">
                             <textarea 
                                 value={profile.bio}
                                 onChange={(e) => setProfile({...profile, bio: e.target.value})}
-                                className="w-full h-40 bg-black/50 border border-cyan-700 rounded p-3 text-gray-300 leading-relaxed focus:border-cyan-400 focus:outline-none resize-none shadow-inner"
+                                className="w-full h-40 bg-black/50 border border-cyan-700 rounded p-3 text-gray-300 resize-none focus:border-cyan-400 focus:outline-none"
                             />
                             <div className="flex justify-end mt-2">
-                                <button 
-                                    onClick={handleSaveText}
-                                    className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold py-2 px-6 rounded transition-all hover:shadow-[0_0_15px_rgba(6,182,212,0.5)]"
-                                >
-                                    SALVAR ALTERAÇÕES
-                                </button>
+                                <button onClick={handleSaveText} className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold py-2 px-6 rounded transition-all">SALVAR ALTERAÇÕES</button>
                             </div>
                         </div>
                         ) : (
-                        <p className="text-base md:text-lg text-gray-300 font-light leading-relaxed whitespace-pre-wrap border-l-2 border-cyan-500/30 pl-4 group-hover/bio:border-cyan-500/60 group-hover/bio:text-cyan-50 transition-all duration-500 group-hover/bio:drop-shadow-[0_0_8px_rgba(6,182,212,0.3)]">
+                        <p className="text-base md:text-lg text-gray-300 font-light leading-relaxed whitespace-pre-wrap border-l-2 border-cyan-500/30 pl-4">
                             {displayedBio}
-                            {!isTypingComplete && (
-                              <span className="inline-block w-2.5 h-5 bg-cyan-400 ml-1 animate-pulse align-middle shadow-[0_0_8px_#22d3ee]"></span>
-                            )}
+                            {!isTypingComplete && <span className="inline-block w-2 h-5 bg-cyan-400 ml-1 animate-pulse align-middle"></span>}
                         </p>
                         )}
                     </div>
@@ -371,59 +339,35 @@ const ProfileModule: React.FC<ProfileModuleProps> = ({ currentThemeHue, onThemeC
               </div>
           </div>
 
-          {/* Social Links */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Github */}
-            <div className="bg-black/40 border border-gray-800 rounded-lg p-4 flex items-center gap-4 transition-all hover:border-gray-500 hover:bg-white/5 hover:translate-x-1 hover:shadow-[0_0_15px_rgba(255,255,255,0.1)]">
+            <div className="bg-black/40 border border-gray-800 rounded-lg p-4 flex items-center gap-4 hover:border-gray-500 transition-all">
               <div className="w-10 h-10 bg-white/10 rounded flex items-center justify-center shrink-0">
-                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
+                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
               </div>
               <div className="flex-1 overflow-hidden">
                 <label className="text-[10px] text-gray-500 uppercase tracking-widest block">GitHub</label>
                 {isEditing ? (
-                  <input 
-                    type="text" 
-                    value={profile.githubUrl}
-                    onChange={(e) => setProfile({...profile, githubUrl: e.target.value})}
-                    placeholder="URL do Perfil"
-                    className="w-full bg-transparent border-b border-gray-700 text-sm text-cyan-300 focus:outline-none"
-                  />
+                  <input type="text" value={profile.githubUrl} onChange={(e) => setProfile({...profile, githubUrl: e.target.value})} className="w-full bg-transparent border-b border-gray-700 text-sm text-cyan-300 focus:outline-none" />
                 ) : (
-                  profile.githubUrl ? (
-                    <a href={profile.githubUrl} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-white truncate block font-mono text-sm">
-                      {profile.githubUrl.replace('https://', '')}
-                    </a>
-                  ) : <span className="text-gray-600 text-sm italic">Não vinculado</span>
+                  profile.githubUrl ? <a href={profile.githubUrl} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-white truncate block text-sm">{profile.githubUrl.replace('https://', '')}</a> : <span className="text-gray-600 text-sm italic">Não vinculado</span>
                 )}
               </div>
             </div>
 
-            {/* LinkedIn */}
-            <div className="bg-black/40 border border-gray-800 rounded-lg p-4 flex items-center gap-4 transition-all hover:border-blue-500/50 hover:bg-blue-900/10 hover:translate-x-1 hover:shadow-[0_0_15px_rgba(59,130,246,0.2)]">
+            <div className="bg-black/40 border border-gray-800 rounded-lg p-4 flex items-center gap-4 hover:border-blue-500/50 transition-all">
               <div className="w-10 h-10 bg-blue-900/20 rounded flex items-center justify-center shrink-0">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-400"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-400"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg>
               </div>
               <div className="flex-1 overflow-hidden">
                 <label className="text-[10px] text-gray-500 uppercase tracking-widest block">LinkedIn</label>
                 {isEditing ? (
-                  <input 
-                    type="text" 
-                    value={profile.linkedinUrl}
-                    onChange={(e) => setProfile({...profile, linkedinUrl: e.target.value})}
-                    placeholder="URL do Perfil"
-                    className="w-full bg-transparent border-b border-gray-700 text-sm text-cyan-300 focus:outline-none"
-                  />
+                  <input type="text" value={profile.linkedinUrl} onChange={(e) => setProfile({...profile, linkedinUrl: e.target.value})} className="w-full bg-transparent border-b border-gray-700 text-sm text-cyan-300 focus:outline-none" />
                 ) : (
-                  profile.linkedinUrl ? (
-                    <a href={profile.linkedinUrl} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-white truncate block font-mono text-sm">
-                      {profile.linkedinUrl.replace('https://', '')}
-                    </a>
-                  ) : <span className="text-gray-600 text-sm italic">Não vinculado</span>
+                  profile.linkedinUrl ? <a href={profile.linkedinUrl} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:text-white truncate block text-sm">{profile.linkedinUrl.replace('https://', '')}</a> : <span className="text-gray-600 text-sm italic">Não vinculado</span>
                 )}
               </div>
             </div>
           </div>
-
         </div>
       </div>
     </div>

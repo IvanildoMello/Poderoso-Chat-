@@ -10,7 +10,7 @@ export interface Message {
   text: string;
   timestamp: Date;
   isError?: boolean;
-  read?: boolean; // New: Read receipt status
+  read?: boolean;
 }
 
 export interface UserProfile {
@@ -29,8 +29,8 @@ export interface UserProfileDetails {
 
 export interface UserStats {
   interactionCount: number;
-  neuralSyncLevel: number; // 0-100%
-  evolutionStage: number; // Level 1-10
+  neuralSyncLevel: number;
+  evolutionStage: number;
   cognitiveAlignment: 'CHAOTIC' | 'NEUTRAL' | 'LAWFUL';
 }
 
@@ -39,13 +39,20 @@ export enum ConnectionStatus {
   OFFLINE = 'OFFLINE'
 }
 
+export interface NetworkDetails {
+  type: 'wifi' | 'cellular' | 'ethernet' | 'unknown' | 'none';
+  effectiveType: '4g' | '3g' | '2g' | 'slow-2g' | 'unknown';
+  downlink: number; // Mbps
+  rtt: number; // ms
+}
+
 export type TaskPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
 export interface Task {
   id: string;
   title: string;
   description: string;
-  dueDate: string; // ISO Date string
+  dueDate: string;
   priority: TaskPriority;
   completed: boolean;
 }
@@ -59,11 +66,10 @@ export interface Notification {
   read: boolean;
 }
 
-// NEW: Persistent System Log History
 export interface SystemLogEntry {
   id: string;
   action: string;
   details: string;
-  timestamp: string; // ISO string for easy storage
+  timestamp: string;
   category: 'SECURITY' | 'TASK' | 'SYSTEM' | 'NETWORK';
 }
